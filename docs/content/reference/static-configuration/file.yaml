@@ -319,6 +319,7 @@ providers:
       cert: foobar
       key: foobar
       insecureSkipVerify: true
+    debugLogGeneratedTemplate: true
   plugin:
     PluginConf0:
       name0: foobar

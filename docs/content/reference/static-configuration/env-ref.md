@@ -711,6 +711,9 @@ Watch provider. (Default: ```true```)
 `TRAEFIK_PROVIDERS_HTTP`:  
 Enable HTTP backend with default settings. (Default: ```false```)
 
+`TRAEFIK_PROVIDERS_HTTP_DEBUGLOGGENERATEDTEMPLATE`:  
+Enable debug logging of generated configuration template. (Default: ```false```)
+
 `TRAEFIK_PROVIDERS_HTTP_ENDPOINT`:  
 Load configuration from this endpoint.
 

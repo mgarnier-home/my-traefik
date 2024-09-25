@@ -274,6 +274,7 @@
     endpoint = "foobar"
     pollInterval = "42s"
     pollTimeout = "42s"
+    debugLogGeneratedTemplate = true
     [providers.http.headers]
       name0 = "foobar"
       name1 = "foobar"

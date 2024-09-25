@@ -711,6 +711,9 @@ Watch provider. (Default: ```true```)
 `--providers.http`:  
 Enable HTTP backend with default settings. (Default: ```false```)
 
+`--providers.http.debugloggeneratedtemplate`:  
+Enable debug logging of generated configuration template. (Default: ```false```)
+
 `--providers.http.endpoint`:  
 Load configuration from this endpoint.
 

@@ -1,14 +1,18 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"net/http"
+	"strings"
+	"text/template"
 	"time"
 
+	"github.com/Masterminds/sprig/v3"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/rs/zerolog/log"
 	"github.com/traefik/paerser/file"
@@ -26,11 +30,12 @@ var _ provider.Provider = (*Provider)(nil)
 
 // Provider is a provider.Provider implementation that queries an HTTP(s) endpoint for a configuration.
 type Provider struct {
-	Endpoint     string            `description:"Load configuration from this endpoint." json:"endpoint" toml:"endpoint" yaml:"endpoint"`
-	PollInterval ptypes.Duration   `description:"Polling interval for endpoint." json:"pollInterval,omitempty" toml:"pollInterval,omitempty" yaml:"pollInterval,omitempty" export:"true"`
-	PollTimeout  ptypes.Duration   `description:"Polling timeout for endpoint." json:"pollTimeout,omitempty" toml:"pollTimeout,omitempty" yaml:"pollTimeout,omitempty" export:"true"`
-	Headers      map[string]string `description:"Define custom headers to be sent to the endpoint." json:"headers,omitempty" toml:"headers,omitempty" yaml:"headers,omitempty" export:"true"`
-	TLS          *types.ClientTLS  `description:"Enable TLS support." json:"tls,omitempty" toml:"tls,omitempty" yaml:"tls,omitempty" export:"true"`
+	Endpoint                  string            `description:"Load configuration from this endpoint." json:"endpoint" toml:"endpoint" yaml:"endpoint"`
+	PollInterval              ptypes.Duration   `description:"Polling interval for endpoint." json:"pollInterval,omitempty" toml:"pollInterval,omitempty" yaml:"pollInterval,omitempty" export:"true"`
+	PollTimeout               ptypes.Duration   `description:"Polling timeout for endpoint." json:"pollTimeout,omitempty" toml:"pollTimeout,omitempty" yaml:"pollTimeout,omitempty" export:"true"`
+	Headers                   map[string]string `description:"Define custom headers to be sent to the endpoint." json:"headers,omitempty" toml:"headers,omitempty" yaml:"headers,omitempty" export:"true"`
+	TLS                       *types.ClientTLS  `description:"Enable TLS support." json:"tls,omitempty" toml:"tls,omitempty" yaml:"tls,omitempty" export:"true"`
+	DebugLogGeneratedTemplate bool              `description:"Enable debug logging of generated configuration template." json:"debugLogGeneratedTemplate,omitempty" toml:"debugLogGeneratedTemplate,omitempty" yaml:"debugLogGeneratedTemplate,omitempty" export:"true"`
 
 	httpClient            *http.Client
 	lastConfigurationHash uint64
@@ -77,7 +82,7 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 		ctxLog := logger.WithContext(routineCtx)
 
 		operation := func() error {
-			if err := p.updateConfiguration(configurationChan); err != nil {
+			if err := p.updateConfiguration(routineCtx, configurationChan); err != nil {
 				return err
 			}
 
@@ -87,7 +92,7 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 			for {
 				select {
 				case <-ticker.C:
-					if err := p.updateConfiguration(configurationChan); err != nil {
+					if err := p.updateConfiguration(routineCtx, configurationChan); err != nil {
 						return err
 					}
 
@@ -109,7 +114,7 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 	return nil
 }
 
-func (p *Provider) updateConfiguration(configurationChan chan<- dynamic.Message) error {
+func (p *Provider) updateConfiguration(ctx context.Context, configurationChan chan<- dynamic.Message) error {
 	configData, err := p.fetchConfigurationData()
 	if err != nil {
 		return fmt.Errorf("cannot fetch configuration data: %w", err)
@@ -128,7 +133,13 @@ func (p *Provider) updateConfiguration(configurationChan chan<- dynamic.Message)
 
 	p.lastConfigurationHash = hash
 
-	configuration, err := decodeConfiguration(configData)
+	configContent, err := p.CreateConfiguration(ctx, string(configData), template.FuncMap{}, false)
+	if err != nil {
+		return fmt.Errorf("cannot create configuration: %w", err)
+	}
+
+	configuration, err := decodeConfiguration(configContent)
+
 	if err != nil {
 		return fmt.Errorf("cannot decode configuration data: %w", err)
 	}
@@ -167,7 +178,7 @@ func (p *Provider) fetchConfigurationData() ([]byte, error) {
 }
 
 // decodeConfiguration decodes and returns the dynamic configuration from the given data.
-func decodeConfiguration(data []byte) (*dynamic.Configuration, error) {
+func decodeConfiguration(configContent string) (*dynamic.Configuration, error) {
 	configuration := &dynamic.Configuration{
 		HTTP: &dynamic.HTTPConfiguration{
 			Routers:           make(map[string]*dynamic.Router),
@@ -190,10 +201,42 @@ func decodeConfiguration(data []byte) (*dynamic.Configuration, error) {
 		},
 	}
 
-	err := file.DecodeContent(string(data), ".yaml", configuration)
+	err := file.DecodeContent(configContent, ".yaml", configuration)
 	if err != nil {
 		return nil, err
 	}
 
 	return configuration, nil
+}
+
+func (p *Provider) CreateConfiguration(ctx context.Context, configContent string, funcMap template.FuncMap, templateObjects interface{}) (string, error) {
+
+	defaultFuncMap := sprig.TxtFuncMap()
+	defaultFuncMap["normalize"] = provider.Normalize
+	defaultFuncMap["split"] = strings.Split
+	for funcID, funcElement := range funcMap {
+		defaultFuncMap[funcID] = funcElement
+	}
+
+	tmpl := template.New("http").Funcs(defaultFuncMap)
+
+	_, err := tmpl.Parse(configContent)
+	if err != nil {
+		return "", err
+	}
+
+	var buffer bytes.Buffer
+	err = tmpl.Execute(&buffer, templateObjects)
+	if err != nil {
+		return "", err
+	}
+
+	renderedTemplate := buffer.String()
+	if p.DebugLogGeneratedTemplate {
+		logger := log.Ctx(ctx)
+		logger.Debug().Msgf("Template content: %s", configContent)
+		logger.Debug().Msgf("Rendering results: %s", renderedTemplate)
+	}
+
+	return renderedTemplate, nil
 }

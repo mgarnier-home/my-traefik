@@ -204,3 +204,7 @@ fmt:
 help: Makefile
 	@echo " Choose a command run in traefik:"
 	@sed -n 's/^#?//p' $< | column -t -s ':' |  sort | sed -e 's/^/ /'
+
+
+build-my-traefik: crossbinary-default
+	docker buildx build --platform linux/amd64,linux/arm64 -t mgarnier11/my-traefik -f my-traefik/Dockerfile --no-cache --progress=plain  --push .

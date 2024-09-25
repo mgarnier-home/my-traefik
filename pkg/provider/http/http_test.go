@@ -135,18 +135,18 @@ func TestProvider_fetchConfigurationData(t *testing.T) {
 func TestProvider_decodeConfiguration(t *testing.T) {
 	tests := []struct {
 		desc       string
-		configData []byte
+		configData string
 		expConfig  *dynamic.Configuration
 		expErr     bool
 	}{
 		{
 			desc:       "should return an error if the configuration data cannot be decoded",
 			expErr:     true,
-			configData: []byte("{"),
+			configData: "{",
 		},
 		{
 			desc:       "should return the decoded dynamic configuration",
-			configData: []byte(`{"tcp":{"routers":{"foo":{}}}}`),
+			configData: `{"tcp":{"routers":{"foo":{}}}}`,
 			expConfig: &dynamic.Configuration{
 				HTTP: &dynamic.HTTPConfiguration{
 					Routers:           make(map[string]*dynamic.Router),
